@@ -120,7 +120,8 @@ int main( int, char**)
 	int camNum = 2;
 	bool fullscreen_flag = false; //Ist fullscreen aktivert oder nicht?
 	bool median_flag = false;
-	bool flip_flag = true;
+	bool flip_flag = false;
+	bool mirror_flag = false; //Mirror-Flag gibt an, ob Bild gespiegelt ist oder nicht
 	DemoState state; //Aktueller Zustand des Spiels
 #if defined _DEBUG || defined LOGGING
 		FILE *log = NULL;
@@ -158,6 +159,8 @@ int main( int, char**)
 		printf( " - 'p'   open the camera-settings panel\n");
 		printf( " - 't'   toggle window size\n");
 		printf( " - 'f'   toggle fullscreen\n");
+		printf( " - 'l'   toggle horizontal flip\n");
+		printf( " - 's'   toggle mirror img\n");
 		printf( " - 'ESC' return to Start Screen \n");
 	}
 	{
@@ -249,16 +252,17 @@ int main( int, char**)
 			break; //Beende die Endlosschleife
 		}
 
-		if (flip_flag) flip(cam_img, cam_img, 1); // cam_img vertikal spiegeln
-		//Strutz cvtColor( cam_img, rgb, CV_BGR2RGB); // Konvertierung BGR zu RGB
+		if (flip_flag) flip(cam_img, cam_img, 0); // cam_img horizontal spiegeln
+		//cvtColor( cam_img, cam_img, CV_BGR2RGB); // Konvertierung BGR zu RGB
 
 		//Runterskalierung des Bildes für weniger Rechaufwand (Faktor 1/2)
+		//double scale = 0.5;
 		//resize(cam_img, rgb_scale, Size(), scale, scale);
 
 		/* smoothing of images */
 		if (median_flag) /* can be toggled with key 'm'*/
 		{
-			medianBlur(cam_img, cam_img, 7);
+			medianBlur(cam_img, cam_img, 3);
 		}
 
 		/* example of accessing the image data */
@@ -267,17 +271,46 @@ int main( int, char**)
 			BGRBGRBGR...
 			:
 			*/
-		for (unsigned int y = 0; y < height; y += 10) /* all 10th rows */
-		{
-			for (unsigned int x = 0; x < width; x += 10)/* all 10th columns */
-			{
-				unsigned long pos = x * channels + y * stride; /* position of pixel (B component) */
+
+		//Spiegelung
+		if (mirror_flag) {
+			//Schwarze TrennLinie zum gespiegelten Bild
+			for (int x = 0; x < width; x++) {
+				unsigned long pos = x * channels + height / 2 * stride; /* position of pixel (B component) */
 				for (unsigned int c = 0; c < channels; c++) /* all components B, G, R */
 				{
 					cam_img.data[pos + c] = 0; /* set all components to black */
 				}
 			}
+			// horizontal Spiegelung der oberen Bildhälfte
+			for (int y = height/2; y < height; y++) {
+				for (int x = 0; x < width; x++) {
+					unsigned long pos = x * channels + y * stride;
+					unsigned long posNew = x * channels + (height - y) * stride;
+					for (unsigned int c = 0; c < channels; c++) /* all components B, G, R */
+					{
+						cam_img.data[pos + c] = cam_img.data[posNew + c]; //Daten der aktuellen Position werden an neue Position gegeben
+					}
+				}
+			}
 		}
+		
+
+		
+		// Punkte alle 10 pixel:
+		
+		//for (unsigned int y = 0; y < height; y += 10) /* all 10th rows */
+		//{
+		//	for (unsigned int x = 0; x < width; x += 10)/* all 10th columns */
+		//	{
+		//		unsigned long pos = x * channels + y * stride; /* position of pixel (B component) */
+		//		for (unsigned int c = 0; c < channels; c++) /* all components B, G, R */
+		//		{
+		//			cam_img.data[pos + c] = 255; /* set all components to black */
+		//		}
+		//	}
+		//}
+		
 
 		/* determination of frames per second	*/
 		frames++;
@@ -317,6 +350,7 @@ int main( int, char**)
 				fullscreen_flag = false;
 			}
 		}
+		
 		if (key == 'm') /* toggle flag */
 		{
 			if (median_flag) median_flag = false;
@@ -325,6 +359,10 @@ int main( int, char**)
 		else if (key == 'l')
 		{
 			flip_flag = 1 - flip_flag; /* toggle left-right flipping of image	*/
+		}
+		else if (key == 's') //toggle mirror_flag (s -> spiegeln)
+		{
+			mirror_flag = 1 - mirror_flag; 
 		}
 
 		if (state == START_SCREEN)
