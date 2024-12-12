@@ -54,6 +54,7 @@ bool click_in_rect(MouseParams mp, Rect rect, char* folder)
 			char path[512];
 			sprintf_s(path, "%s/click_on_button.wav", folder);
 			PlaySoundA(path, NULL, SND_ASYNC);
+			
 			return true;
 		}
 	}
@@ -122,6 +123,8 @@ int main( int, char**)
 	bool median_flag = false;
 	bool flip_flag = false;
 	bool mirror_flag = false; //Mirror-Flag gibt an, ob Bild gespiegelt ist oder nicht
+	bool water_color = false; //Water-Flag gibt an, ob Wasserfarben verwendet werden
+	bool radial_wave = false; //Radial-Flag gibt an, ob Radialwellen verwendet werden
 	DemoState state; //Aktueller Zustand des Spiels
 #if defined _DEBUG || defined LOGGING
 		FILE *log = NULL;
@@ -161,16 +164,19 @@ int main( int, char**)
 		printf( " - 'f'   toggle fullscreen\n");
 		printf( " - 'l'   toggle horizontal flip\n");
 		printf( " - 's'   toggle mirror img\n");
+		printf( " - 'w'   toggle water color\n");
+		printf( " - 'r'   toggle radial wavve\n");
 		printf( " - 'ESC' return to Start Screen \n");
 	}
 	{
 		HWND console = GetConsoleWindow();
-		RECT r;	
+		RECT r;
+
 		GetWindowRect( console, &r); //stores the console's current dimensions
 
 		//MoveWindow(window_handle, x, y, width, height, redraw_window);
-		//MoveWindow( console, r.left, r.top, 800, 600, TRUE);
-		MoveWindow( console, 10, 0, 850, 800, TRUE);
+		MoveWindow( console, r.left, r.top, 800, 600, TRUE);
+		//MoveWindow( console, 10, 0, 850, 800, TRUE);
 	}
 
 #ifndef _DEBUG
@@ -185,6 +191,10 @@ int main( int, char**)
 	height = cam_img.rows;
 	channels = cam_img.channels();
 	stride = width * channels;
+	printf("\nwidth = " + width);
+	printf("\nheight = " + height);
+	
+		
 
 	//Handle für das Fenster vorbereiten
 	namedWindow( windowGameOutput, WINDOW_NORMAL|CV_GUI_EXPANDED); //Erlauben des Maximierens
@@ -230,6 +240,17 @@ int main( int, char**)
 
 	// Setup zum Auswerten von Mausevents
 	setMouseCallback( windowGameOutput, mouse_event, (void*)&mp);
+
+
+	// Initialisierungen für radiale Wellen
+	// Wellenparameter
+	const double amplitude = 255.0;   // Maximale Amplitude
+	const double wavelength = 20.0;  // Wellenlänge
+	const double speed = 5.0;        // Geschwindigkeit der Welle
+	const double damping = 0.1;     // Dämpfung
+	double time = 0.0;               // Zeitparameter
+	
+
 
 
 	/*-------------------- main loop ---------------*/
@@ -294,22 +315,47 @@ int main( int, char**)
 				}
 			}
 		}
-		
 
-		
-		// Punkte alle 10 pixel:
-		
-		//for (unsigned int y = 0; y < height; y += 10) /* all 10th rows */
-		//{
-		//	for (unsigned int x = 0; x < width; x += 10)/* all 10th columns */
-		//	{
-		//		unsigned long pos = x * channels + y * stride; /* position of pixel (B component) */
-		//		for (unsigned int c = 0; c < channels; c++) /* all components B, G, R */
-		//		{
-		//			cam_img.data[pos + c] = 255; /* set all components to black */
-		//		}
-		//	}
-		//}
+		//Wasserfarben in der unteren Bildhälfte
+		//BGR Farbkanäle werden in RGB Farbkanäle konvertiert
+		if (water_color) {
+			for (int y = height/2; y < height; y++) {
+				for (int x = 0; x < width; x++) {
+					unsigned long pos = x * channels + y * stride;
+					int tmp = cam_img.data[pos];
+					cam_img.data[pos] = cam_img.data[pos + 2];
+					cam_img.data[pos + 2] = tmp;
+				}
+			}
+		}
+
+		//radiale Wellen im Bild
+		//Zunächst Wellenwert Berechnung an Punkt (x, y) durch Sinusfunktion (Abstand zum Mittelpunkt|Startpunkt berechnen => Radius r)
+		//Danach Phasenverschiebung => Welle
+		if (radial_wave) {
+			
+			// Mittelpunkt des Bildes
+			const int cx = width / 2;
+			const int cy = height / 2;
+
+			for (int y = height/2; y < height; ++y) {
+				for (int x = 0; x < width; ++x) {
+					// Abstand vom Mittelpunkt
+					double r = std::sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy));
+
+					// Wassertropfen-Welle berechnen
+					double wave = amplitude * std::sin(2.0 * CV_PI * r / wavelength - speed * time) / (1.0 + damping * r);
+
+					//Farbwerte setzen (Achtung BGR nicht RGB!)
+					unsigned long pos = x * channels + y * stride;
+					for (unsigned int c = 0; c < channels; c++) {
+						cam_img.data[pos + c] = saturate_cast<uchar>(cam_img.data[pos + c] + wave);
+					}
+				}
+			}
+			// Zeitparameter anpassen
+			time += 0.1;
+		}
 		
 
 		/* determination of frames per second	*/
@@ -362,7 +408,13 @@ int main( int, char**)
 		}
 		else if (key == 's') //toggle mirror_flag (s -> spiegeln)
 		{
-			mirror_flag = 1 - mirror_flag; 
+			mirror_flag = 1 - mirror_flag;
+		}
+		else if (key == 'w') { // toggle water_color (w -> wasserfarbe)
+			water_color = 1 - water_color;
+		}
+		else if (key == 'r') { // toggle radial_wave (r -> radiale Wellen)
+			radial_wave = 1 - radial_wave;
 		}
 
 		if (state == START_SCREEN)
@@ -387,18 +439,32 @@ int main( int, char**)
 		/* example for using the mouse events */
 		if (click_left(mp, folder))
 		{
-			// state = DEMO_STOP;
-			for ( int y = mp.mouse_pos.y-20; y < mp.mouse_pos.y+20; y++) /* all rows */
-			{
-				for ( int x = mp.mouse_pos.x-15; x < mp.mouse_pos.x + 15; x++)/* all columns */
-				{
-					unsigned long pos = x * channels + y * stride; /* position of pixel (R component) */
-					for (unsigned int c = 0; c < channels; c++) /* all components */
-					{
-						cam_img.data[pos + c] = 0; /* set all components to black */
+			
+		}
+
+		Rect rect(0, height/2, width, height);
+		if (click_in_rect(mp, rect, folder)) {
+			// mittelpunkt des bildes
+			const int cx = mp.mouse_pos.x;
+			const int cy = mp.mouse_pos.y;
+
+			for (int y = height / 2; y < height; ++y) {
+				for (int x = 0; x < width; ++x) {
+					// abstand vom mittelpunkt
+					double r = std::sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy));
+
+					// wassertropfen-welle berechnen
+					double wave = amplitude * std::sin(2.0 * CV_PI * r / wavelength - speed * time) / (1.0 + damping * r);
+
+					//farbwerte mit wellenwert addieren
+					unsigned long pos = x * channels + y * stride;
+					for (unsigned int c = 0; c < channels; c++) {
+						cam_img.data[pos + c] = saturate_cast<uchar>(cam_img.data[pos + c] + wave);
 					}
 				}
 			}
+			// zeitparameter anpassen
+			time += 0.1;
 		}
 
 		/********************************************************************************************/

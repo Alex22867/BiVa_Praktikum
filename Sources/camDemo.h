@@ -17,6 +17,7 @@
 #include <windows.h>
 #include "stdafx.h"
 #include <time.h>
+#include <cmath>
 
 #pragma comment( lib, "winmm.lib")  //für MSV C++  für play sounds
 
