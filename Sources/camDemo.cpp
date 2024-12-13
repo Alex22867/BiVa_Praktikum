@@ -54,7 +54,11 @@ bool click_in_rect(MouseParams mp, Rect rect, char* folder)
 			char path[512];
 			sprintf_s(path, "%s/click_on_button.wav", folder);
 			PlaySoundA(path, NULL, SND_ASYNC);
-			
+			const double amplitude = 255.0;   // Maximale Amplitude
+			const double wavelength = 50.0;  // Wellenlänge
+			const double speed = 1.0;        // Geschwindigkeit der Welle
+			const double damping = 0.3;     // Dämpfung
+			double time = 0.0;               // Zeitparameter
 			return true;
 		}
 	}
@@ -245,12 +249,10 @@ int main( int, char**)
 	// Initialisierungen für radiale Wellen
 	// Wellenparameter
 	const double amplitude = 255.0;   // Maximale Amplitude
-	const double wavelength = 20.0;  // Wellenlänge
-	const double speed = 5.0;        // Geschwindigkeit der Welle
-	const double damping = 0.1;     // Dämpfung
+	const double wavelength = 50.0;  // Wellenlänge
+	const double speed = 2.0;        // Geschwindigkeit der Welle
+	const double damping = 0.2;     // Dämpfung
 	double time = 0.0;               // Zeitparameter
-	
-
 
 
 	/*-------------------- main loop ---------------*/
@@ -296,13 +298,16 @@ int main( int, char**)
 		//Spiegelung
 		if (mirror_flag) {
 			//Schwarze TrennLinie zum gespiegelten Bild
-			for (int x = 0; x < width; x++) {
-				unsigned long pos = x * channels + height / 2 * stride; /* position of pixel (B component) */
-				for (unsigned int c = 0; c < channels; c++) /* all components B, G, R */
-				{
-					cam_img.data[pos + c] = 0; /* set all components to black */
-				}
-			}
+			//for (int x = 0; x < width; x++) {
+			//	unsigned long pos = x * channels + height / 2 * stride; /* position of pixel (B component) */
+			//	for (unsigned int c = 0; c < channels; c++) /* all components B, G, R */
+			//	{
+			//		cam_img.data[pos + c] = 0; /* set all components to black */
+			//	}
+			//}
+			
+
+
 			// horizontal Spiegelung der oberen Bildhälfte
 			for (int y = height/2; y < height; y++) {
 				for (int x = 0; x < width; x++) {
@@ -317,14 +322,56 @@ int main( int, char**)
 		}
 
 		//Wasserfarben in der unteren Bildhälfte
-		//BGR Farbkanäle werden in RGB Farbkanäle konvertiert
 		if (water_color) {
-			for (int y = height/2; y < height; y++) {
+			//BGR Farbkanäle werden in RGB Farbkanäle konvertiert
+			/*for (int y = height/2; y < height; y++) {
 				for (int x = 0; x < width; x++) {
 					unsigned long pos = x * channels + y * stride;
 					int tmp = cam_img.data[pos];
 					cam_img.data[pos] = cam_img.data[pos + 2];
 					cam_img.data[pos + 2] = tmp;
+				}
+			}*/
+
+			//Blauwerte erhöhen
+			/*for (int y = height / 2; y < height-60; y++) {
+				for (int x = 0; x < width; x++) {
+					unsigned long pos = x * channels + y * stride;
+					(((255) < ((cam_img.data[pos] + 55)) ? (255) : ((cam_img.data[pos] + 55))
+				}
+			}*/
+
+			//Durchschnittswerte der nachbarn berechnen (Glättung)
+			for (int y = height / 2 + 1; y < height - 59; ++y) {
+				for (int x = 1; x < width-1; ++x){
+					int avg[3] {0, 0, 0};
+
+					//Nachbarwerte für RGB addieren
+					for (int iy = -1; iy <= 1; ++iy) {
+						for (int ix = -1; ix <= 1; ++ix) {
+							unsigned int neighbor_pos = (x + ix) * channels + (y + iy) * stride;
+							for (int c = 0; c < channels; ++c) {
+								avg[c] += cam_img.data[neighbor_pos + c];
+							}
+						}
+					}
+
+					//Mittelwert berechnen und auf Pixel anwenden
+					unsigned int pos = x * channels + y * stride;
+					for (int c = 0; c < channels; ++c) {
+						avg[c] /= 9; // Durchschnitt
+						cam_img.data[pos + c] = (((255) < ((cam_img.data[pos + c] + avg[c]) / 2)) ? (255) : ((cam_img.data[pos + c] + avg[c]) / 2)); // Begrenzung auf 255
+					}
+				}
+			}
+
+			for (int y = height/2; y < height-60; ++y) {
+				for (int x = 0; x < width; ++x) {
+					unsigned int pos = x * channels + y * stride;
+					for (int c = 0; c < channels; ++c) {
+						// Reduzierte Farbtiefe, z. B. 8 Stufen
+						cam_img.data[pos + c] = (cam_img.data[pos + c] / 32) * 32;
+					}
 				}
 			}
 		}
@@ -334,11 +381,11 @@ int main( int, char**)
 		//Danach Phasenverschiebung => Welle
 		if (radial_wave) {
 			
-			// Mittelpunkt des Bildes
+			// Punkt der Wellen Quelle
 			const int cx = width / 2;
-			const int cy = height / 2;
+			const int cy = height / 3;
 
-			for (int y = height/2; y < height; ++y) {
+			for (int y = height/2; y < height-60; ++y) {
 				for (int x = 0; x < width; ++x) {
 					// Abstand vom Mittelpunkt
 					double r = std::sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy));
@@ -442,13 +489,13 @@ int main( int, char**)
 			
 		}
 
-		Rect rect(0, height/2, width, height);
+		Rect rect(0, height/2, width, ((height/2)-60));
 		if (click_in_rect(mp, rect, folder)) {
-			// mittelpunkt des bildes
+			// Wellenquelle
 			const int cx = mp.mouse_pos.x;
 			const int cy = mp.mouse_pos.y;
 
-			for (int y = height / 2; y < height; ++y) {
+			for (int y = height / 2; y < height-60; ++y) {
 				for (int x = 0; x < width; ++x) {
 					// abstand vom mittelpunkt
 					double r = std::sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy));
@@ -466,7 +513,7 @@ int main( int, char**)
 			// zeitparameter anpassen
 			time += 0.1;
 		}
-
+		std::this_thread::sleep_for(std::chrono::milliseconds(30));
 		/********************************************************************************************/
 		/* show window with live video	*/		//Le-Wi: Funktionalitäten zum Schließen (x-Button)
 		if (!IsWindowVisible( cvHwnd)) 
