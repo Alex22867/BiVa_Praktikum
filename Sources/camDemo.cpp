@@ -324,15 +324,17 @@ int main( int, char**)
 		//Wasserfarben in der unteren Bildhälfte
 		if (water_color) {
 			//BGR Farbkanäle werden in RGB Farbkanäle konvertiert
-			/*for (int y = height/2; y < height; y++) {
+			for (int y = height/2; y < height; y++) {
 				for (int x = 0; x < width; x++) {
 					unsigned long pos = x * channels + y * stride;
 					int tmp = cam_img.data[pos];
 					cam_img.data[pos] = cam_img.data[pos + 2];
 					cam_img.data[pos + 2] = tmp;
 				}
-			}*/
+			}
 
+			// folgende Code Abschnitte sind andere Ansätze
+			
 			//Blauwerte erhöhen
 			/*for (int y = height / 2; y < height-60; y++) {
 				for (int x = 0; x < width; x++) {
@@ -342,38 +344,38 @@ int main( int, char**)
 			}*/
 
 			//Durchschnittswerte der nachbarn berechnen (Glättung)
-			for (int y = height / 2 + 1; y < height - 59; ++y) {
-				for (int x = 1; x < width-1; ++x){
-					int avg[3] {0, 0, 0};
+			//for (int y = height / 2 + 1; y < height - 59; ++y) {
+			//	for (int x = 1; x < width-1; ++x){
+			//		int avg[3] {0, 0, 0};
 
-					//Nachbarwerte für RGB addieren
-					for (int iy = -1; iy <= 1; ++iy) {
-						for (int ix = -1; ix <= 1; ++ix) {
-							unsigned int neighbor_pos = (x + ix) * channels + (y + iy) * stride;
-							for (int c = 0; c < channels; ++c) {
-								avg[c] += cam_img.data[neighbor_pos + c];
-							}
-						}
-					}
+			//		//Nachbarwerte für RGB addieren
+			//		for (int iy = -1; iy <= 1; ++iy) {
+			//			for (int ix = -1; ix <= 1; ++ix) {
+			//				unsigned int neighbor_pos = (x + ix) * channels + (y + iy) * stride;
+			//				for (int c = 0; c < channels; ++c) {
+			//					avg[c] += cam_img.data[neighbor_pos + c];
+			//				}
+			//			}
+			//		}
 
-					//Mittelwert berechnen und auf Pixel anwenden
-					unsigned int pos = x * channels + y * stride;
-					for (int c = 0; c < channels; ++c) {
-						avg[c] /= 9; // Durchschnitt
-						cam_img.data[pos + c] = (((255) < ((cam_img.data[pos + c] + avg[c]) / 2)) ? (255) : ((cam_img.data[pos + c] + avg[c]) / 2)); // Begrenzung auf 255
-					}
-				}
-			}
+			//		//Mittelwert berechnen und auf Pixel anwenden
+			//		unsigned int pos = x * channels + y * stride;
+			//		for (int c = 0; c < channels; ++c) {
+			//			avg[c] /= 9; // Durchschnitt
+			//			cam_img.data[pos + c] = (((255) < ((cam_img.data[pos + c] + avg[c]) / 2)) ? (255) : ((cam_img.data[pos + c] + avg[c]) / 2)); // Begrenzung auf 255
+			//		}
+			//	}
+			//}
 
-			for (int y = height/2; y < height-60; ++y) {
-				for (int x = 0; x < width; ++x) {
-					unsigned int pos = x * channels + y * stride;
-					for (int c = 0; c < channels; ++c) {
-						// Reduzierte Farbtiefe, z. B. 8 Stufen
-						cam_img.data[pos + c] = (cam_img.data[pos + c] / 32) * 32;
-					}
-				}
-			}
+			//for (int y = height/2; y < height-60; ++y) {
+			//	for (int x = 0; x < width; ++x) {
+			//		unsigned int pos = x * channels + y * stride;
+			//		for (int c = 0; c < channels; ++c) {
+			//			// Reduzierte Farbtiefe, z. B. 8 Stufen
+			//			cam_img.data[pos + c] = (cam_img.data[pos + c] / 32) * 32;
+			//		}
+			//	}
+			//}
 		}
 
 		//radiale Wellen im Bild
