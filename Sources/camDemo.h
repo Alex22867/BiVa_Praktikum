@@ -18,6 +18,8 @@
 #include "stdafx.h"
 #include <time.h>
 #include <cmath>
+#include <vector>
+#include <algorithm>
 
 #pragma comment( lib, "winmm.lib")  //für MSV C++  für play sounds
 

@@ -8,6 +8,16 @@
 
 #include "camDemo.h"
 
+
+//Struktur für einzelne Wellen
+struct Wave{
+	int wx; //Koordinaten der Welle
+	int wy; 
+	double startTime; //Startzeitpunkt der Welle
+};
+
+
+
 /* --------------------------------------------------------------
  * mouse_event()
  * openCV-Funktion um MouseEvents auszuwerten  
@@ -29,9 +39,6 @@ bool click_left(MouseParams mp, char* folder)
 	if (mp.evt == EVENT_LBUTTONDOWN)
 	{
 		{
-			char path[512];
-			sprintf_s(path, "%s/click_on_button.wav", folder);
-			PlaySoundA(path, NULL, SND_ASYNC);
 			return true;
 		}
 	}
@@ -51,14 +58,9 @@ bool click_in_rect(MouseParams mp, Rect rect, char* folder)
 				mp.mouse_pos.x <= rect.x + rect.width &&
 				mp.mouse_pos.y <= rect.y + rect.height)
 		{
-			char path[512];
-			sprintf_s(path, "%s/click_on_button.wav", folder);
-			PlaySoundA(path, NULL, SND_ASYNC);
-			const double amplitude = 255.0;   // Maximale Amplitude
-			const double wavelength = 50.0;  // Wellenlänge
-			const double speed = 1.0;        // Geschwindigkeit der Welle
-			const double damping = 0.3;     // Dämpfung
-			double time = 0.0;               // Zeitparameter
+			/*char path[512];
+			sprintf_s(path, "%s/waterdrop.mp3", folder);
+			PlaySoundA(path, NULL, SND_ASYNC);*/
 			return true;
 		}
 	}
@@ -83,7 +85,6 @@ bool mouse_in_rect(MouseParams mp, Rect rect)
 	}
 	return false;
 }
-
 
 /*---------------------------------------------------------------
 * main()
@@ -124,11 +125,11 @@ int main( int, char**)
 		fps = 0;	//frames pro Sekunde
 	int camNum = 2;
 	bool fullscreen_flag = false; //Ist fullscreen aktivert oder nicht?
-	bool median_flag = false;
-	bool flip_flag = false;
 	bool mirror_flag = false; //Mirror-Flag gibt an, ob Bild gespiegelt ist oder nicht
-	bool water_color = false; //Water-Flag gibt an, ob Wasserfarben verwendet werden
-	bool radial_wave = false; //Radial-Flag gibt an, ob Radialwellen verwendet werden
+	bool water_color = false; //Water-Color-Flag gibt an, ob Wasserfarben verwendet werden
+	bool water_effect = false;//Water-Effect-Flag gibt an, ob Wassereffekte verwendet werden
+	bool radial_flag = false; //Radial-Flag gibt an, ob Radialwellen verwendet werden
+	bool play_flag = false;   //Play-Flag um alle Effekte gleichzeitig zu aktivieren
 	DemoState state; //Aktueller Zustand des Spiels
 #if defined _DEBUG || defined LOGGING
 		FILE *log = NULL;
@@ -158,19 +159,17 @@ int main( int, char**)
 	}
 	else
 	{
-		/* some infos on console	*/
-		printf( "==> Program Control <==\n");
-		printf( "==                   ==\n");
-		printf( "* Start Screen\n");
-		printf( " - 'ESC' stop the program \n");
-		printf( " - 'p'   open the camera-settings panel\n");
-		printf( " - 't'   toggle window size\n");
-		printf( " - 'f'   toggle fullscreen\n");
-		printf( " - 'l'   toggle horizontal flip\n");
-		printf( " - 's'   toggle mirror img\n");
-		printf( " - 'w'   toggle water color\n");
-		printf( " - 'r'   toggle radial wavve\n");
-		printf( " - 'ESC' return to Start Screen \n");
+		//Infos auf der Konsole
+		printf("==> Program Control <==\n");
+		printf("==                   ==\n");
+		printf("* Start Screen\n");
+		printf(" - 'ESC' stop the program \n");
+		printf(" - 'f'   toggle fullscreen\n");
+		printf(" - 's'   toggle mirror img\n");
+		printf(" - 'w'   toggle water color\n");
+		printf(" - 'e'   toggle water effect\n");
+		printf(" - 'r'   toggle radial wave\n");
+		printf(" - 'p'   toggle all effects\n");
 	}
 	{
 		HWND console = GetConsoleWindow();
@@ -195,11 +194,7 @@ int main( int, char**)
 	height = cam_img.rows;
 	channels = cam_img.channels();
 	stride = width * channels;
-	printf("\nwidth = " + width);
-	printf("\nheight = " + height);
 	
-		
-
 	//Handle für das Fenster vorbereiten
 	namedWindow( windowGameOutput, WINDOW_NORMAL|CV_GUI_EXPANDED); //Erlauben des Maximierens
 	resizeWindow( windowGameOutput, width, height); //Start Auflösung der Kamera
@@ -211,12 +206,12 @@ int main( int, char**)
 	{
 		FILE* in = NULL;
 		strcpy_s(folder, folder1);/* try first folder */
-		sprintf_s(path, "%s/click_on_button.wav", folder);
+		sprintf_s(path, "%s/waterdrop.mp3", folder);
 		in = fopen(path, "r");
 		if (in == NULL)
 		{
 			strcpy_s(folder, folder2); /* try other folder */
-			sprintf_s(path, "%s/click_on_button.wav", folder);
+			sprintf_s(path, "%s/waterdrop.mp3", folder);
 			in = fopen(path, "r");
 			if (in == NULL)
 			{
@@ -229,31 +224,27 @@ int main( int, char**)
 
 	start_time = clock();
 
-
-	/* structure element for dilation of binary image */
-	//{
-	//	int strElRadius = 3;
-	//	int size = strElRadius * 2 + 1;
-	//	strElement = Mat( size, size, CV_8UC1, Scalar::all( 0)); 
-	//	//Einzeichnen des eigentlichen Strukturelements (weißer Kreis)
-	//	/* ( , Mittelpunkt, radius, weiß, thickness=gefüllt*/
-	//	circle( strElement, Point( strElRadius, strElRadius), strElRadius, Scalar( 255), -1);
-	//}
-
 	state = START_SCREEN;
 
 	// Setup zum Auswerten von Mausevents
 	setMouseCallback( windowGameOutput, mouse_event, (void*)&mp);
 
+	//Vektoren für Wassereffekt:
+	vector<unsigned char> smooth_img(width * height * channels);
+	vector<unsigned char> edge_data(width * height * channels);
+	
+	//Wellenparameter:
+	vector<Wave> waves; //Liste der aktuell aktiven Wellen
 
-	// Initialisierungen für radiale Wellen
-	// Wellenparameter
-	const double amplitude = 255.0;   // Maximale Amplitude
-	const double wavelength = 50.0;  // Wellenlänge
-	const double speed = 2.0;        // Geschwindigkeit der Welle
-	const double damping = 0.2;     // Dämpfung
-	double time = 0.0;               // Zeitparameter
+	const double amplitude = 255.0; // Maximale Amplitude
+	const double wavelength = 50.0; // Wellenlänge
+	const double speed = 10.0;      // Geschwindigkeit der Welle
+	const double damping = 0.5;		// räumliche Dämpfung
+	const double alpha = 1.0;		// Parameter zur Berechnung der zeitlichen Dämpfung
+	const double MaxWaveTime = 2.0;	// lebensdauer einer Welle
 
+	double globalTime = 0.0;
+	double TimeDiv = 1.0 / 30.0;	
 
 	/*-------------------- main loop ---------------*/
 	while (state != DEMO_STOP)
@@ -275,40 +266,16 @@ int main( int, char**)
 			break; //Beende die Endlosschleife
 		}
 
-		if (flip_flag) flip(cam_img, cam_img, 0); // cam_img horizontal spiegeln
-		//cvtColor( cam_img, cam_img, CV_BGR2RGB); // Konvertierung BGR zu RGB
+		//Aktuelle Zeit berechnen
+		globalTime += TimeDiv;
 
 		//Runterskalierung des Bildes für weniger Rechaufwand (Faktor 1/2)
 		//double scale = 0.5;
 		//resize(cam_img, rgb_scale, Size(), scale, scale);
 
-		/* smoothing of images */
-		if (median_flag) /* can be toggled with key 'm'*/
-		{
-			medianBlur(cam_img, cam_img, 3);
-		}
-
-		/* example of accessing the image data */
-		/* order is:
-			BGRBGRBGR...
-			BGRBGRBGR...
-			:
-			*/
-
 		//Spiegelung
 		if (mirror_flag) {
-			//Schwarze TrennLinie zum gespiegelten Bild
-			//for (int x = 0; x < width; x++) {
-			//	unsigned long pos = x * channels + height / 2 * stride; /* position of pixel (B component) */
-			//	for (unsigned int c = 0; c < channels; c++) /* all components B, G, R */
-			//	{
-			//		cam_img.data[pos + c] = 0; /* set all components to black */
-			//	}
-			//}
-			
-
-
-			// horizontal Spiegelung der oberen Bildhälfte
+			// horizontale Spiegelung der oberen Bildhälfte
 			for (int y = height/2; y < height; y++) {
 				for (int x = 0; x < width; x++) {
 					unsigned long pos = x * channels + y * stride;
@@ -324,7 +291,7 @@ int main( int, char**)
 		//Wasserfarben in der unteren Bildhälfte
 		if (water_color) {
 			//BGR Farbkanäle werden in RGB Farbkanäle konvertiert
-			for (int y = height/2; y < height; y++) {
+			for (int y = height / 2; y < height; y++) {
 				for (int x = 0; x < width; x++) {
 					unsigned long pos = x * channels + y * stride;
 					int tmp = cam_img.data[pos];
@@ -332,78 +299,100 @@ int main( int, char**)
 					cam_img.data[pos + 2] = tmp;
 				}
 			}
+		}
 
-			// folgende Code Abschnitte sind andere Ansätze
-			
-			//Blauwerte erhöhen
-			/*for (int y = height / 2; y < height-60; y++) {
-				for (int x = 0; x < width; x++) {
-					unsigned long pos = x * channels + y * stride;
-					(((255) < ((cam_img.data[pos] + 55)) ? (255) : ((cam_img.data[pos] + 55))
-				}
-			}*/
-
+		if(water_effect){
 			//Durchschnittswerte der nachbarn berechnen (Glättung)
-			//for (int y = height / 2 + 1; y < height - 59; ++y) {
-			//	for (int x = 1; x < width-1; ++x){
-			//		int avg[3] {0, 0, 0};
+			for (int y = height / 2 + 1; y < height - 59; ++y) {
+				for (int x = 1; x < width-1; ++x){
+					int avg[3] {0, 0, 0};
 
-			//		//Nachbarwerte für RGB addieren
-			//		for (int iy = -1; iy <= 1; ++iy) {
-			//			for (int ix = -1; ix <= 1; ++ix) {
-			//				unsigned int neighbor_pos = (x + ix) * channels + (y + iy) * stride;
-			//				for (int c = 0; c < channels; ++c) {
-			//					avg[c] += cam_img.data[neighbor_pos + c];
-			//				}
-			//			}
-			//		}
+					//Nachbarwerte für RGB addieren
+					for (int iy = -1; iy <= 1; ++iy) {
+						for (int ix = -1; ix <= 1; ++ix) {
+							unsigned int neighbor_pos = (x + ix) * channels + (y + iy) * stride;
+							for (int c = 0; c < channels; ++c) {
+								avg[c] += cam_img.data[neighbor_pos + c];
+							}
+						}
+					}
 
-			//		//Mittelwert berechnen und auf Pixel anwenden
-			//		unsigned int pos = x * channels + y * stride;
-			//		for (int c = 0; c < channels; ++c) {
-			//			avg[c] /= 9; // Durchschnitt
-			//			cam_img.data[pos + c] = (((255) < ((cam_img.data[pos + c] + avg[c]) / 2)) ? (255) : ((cam_img.data[pos + c] + avg[c]) / 2)); // Begrenzung auf 255
-			//		}
-			//	}
-			//}
+					//Mittelwert berechnen
+					unsigned int pos = x * channels + y * stride;
+					for (int c = 0; c < channels; ++c) {
+						avg[c] /= 9; // Durchschnitt
+						smooth_img[pos + c] = avg[c];
+					}
+				}
+			}
+			//Kantenerkennung (Sobel-Operator)
+			for (int y = height / 2 + 1; y < height - 59; ++y) {
+				for (int x = 1; x < width - 1; ++x) {
+					int gradient[3] = { 0, 0, 0 };
 
-			//for (int y = height/2; y < height-60; ++y) {
-			//	for (int x = 0; x < width; ++x) {
-			//		unsigned int pos = x * channels + y * stride;
-			//		for (int c = 0; c < channels; ++c) {
-			//			// Reduzierte Farbtiefe, z. B. 8 Stufen
-			//			cam_img.data[pos + c] = (cam_img.data[pos + c] / 32) * 32;
-			//		}
-			//	}
-			//}
+					for (int c = 0; c < channels; ++c) {
+						int gx = 0;
+						int gy = 0;
+
+						for (int iy = -1; iy <= 1; ++iy) {
+							for (int ix = -1; ix <= 1; ++ix) {
+								int weight_x = (ix == -1) ? -1 : (ix == 1) ? 1 : 0;
+								int weight_y = (iy == -1) ? -1 : (iy == 1) ? 1 : 0;
+
+								unsigned int neighbor_pos = (x + ix) * channels + (y + iy) * stride;
+								gx += smooth_img[neighbor_pos + c] * weight_x;
+								gy += smooth_img[neighbor_pos + c] * weight_y;
+							}
+						}
+
+						// Gradientenberechnung
+						gradient[c] = sqrt(gx * gx + gy * gy);
+					}
+
+					unsigned int pos = x * channels + y * stride;
+					for (int c = 0; c < channels; ++c) {
+						edge_data[pos + c] = min(255, gradient[c]); // Begrenzung
+					}
+				}
+			}
+			// 3. Farbtiefen-Reduzierung (Posterization)
+			for (int y = height / 2; y < height-60; ++y) {
+				for (int x = 0; x < width; ++x) {
+					unsigned int pos = x * channels + y * stride;
+					for (int c = 0; c < channels; ++c) {
+						// Reduzierte Farbtiefe, z. B. 16 Stufen
+						cam_img.data[pos + c] = (cam_img.data[pos + c] / 16) * 16;
+
+						// Kombinieren von Kantendaten mit dem Originalbild
+						cam_img.data[pos + c] = min(255, cam_img.data[pos + c] + edge_data[pos + c] / 2);
+					}
+				}
+			}
 		}
 
 		//radiale Wellen im Bild
-		//Zunächst Wellenwert Berechnung an Punkt (x, y) durch Sinusfunktion (Abstand zum Mittelpunkt|Startpunkt berechnen => Radius r)
-		//Danach Phasenverschiebung => Welle
-		if (radial_wave) {
-			
-			// Punkt der Wellen Quelle
+		//Zunächst Wellenwert Berechnung an Punkt (x, y) durch Sinusfunktion (Abstand zum Quellpunkt berechnen => Radius r)
+		if (radial_flag) {
+
+			//Koordinaten der Wellenquelle
 			const int cx = width / 2;
 			const int cy = height / 3;
-
-			for (int y = height/2; y < height-60; ++y) {
+			
+			for (int y = height / 2; y < height - 60; ++y) {
 				for (int x = 0; x < width; ++x) {
-					// Abstand vom Mittelpunkt
-					double r = std::sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy));
+					// Abstand zur Quelle
+					double r = sqrt(pow(x - cx, 2) + pow(y - cy, 2));
 
 					// Wassertropfen-Welle berechnen
-					double wave = amplitude * std::sin(2.0 * CV_PI * r / wavelength - speed * time) / (1.0 + damping * r);
+					double wave = amplitude * std::sin(2.0 * CV_PI * r / wavelength - speed * globalTime) / (1.0 + damping * r);
 
-					//Farbwerte setzen (Achtung BGR nicht RGB!)
+					//Farbwerte setzen
 					unsigned long pos = x * channels + y * stride;
 					for (unsigned int c = 0; c < channels; c++) {
 						cam_img.data[pos + c] = saturate_cast<uchar>(cam_img.data[pos + c] + wave);
 					}
 				}
 			}
-			// Zeitparameter anpassen
-			time += 0.1;
 		}
 		
 
@@ -427,6 +416,13 @@ int main( int, char**)
 			0.5 /*fontScale*/, Scalar( 0, 255, 255), 2);
 #endif
 
+		//Height-Ausgabe oben links
+		char info_char[5];
+		sprintf(info_char, "%d", height);
+		const string& info_string = (string)info_char;
+		putText(cam_img, info_string, Point(40, 25), FONT_HERSHEY_SIMPLEX,
+			0.5 /*fontScale*/, Scalar(0, 255, 255), 2);
+
 		/* input from keyboard */
 		key = tolower( waitKey(1)); /* Strutz  convert to lower case */
 		// Vollbildschirm ein- bzw. ausschalten
@@ -445,25 +441,24 @@ int main( int, char**)
 				fullscreen_flag = false;
 			}
 		}
-		
-		if (key == 'm') /* toggle flag */
-		{
-			if (median_flag) median_flag = false;
-			else median_flag = true;
-		}
-		else if (key == 'l')
-		{
-			flip_flag = 1 - flip_flag; /* toggle left-right flipping of image	*/
-		}
-		else if (key == 's') //toggle mirror_flag (s -> spiegeln)
+		if (key == 's') //toggle mirror_flag (s -> spiegeln)
 		{
 			mirror_flag = 1 - mirror_flag;
 		}
 		else if (key == 'w') { // toggle water_color (w -> wasserfarbe)
 			water_color = 1 - water_color;
 		}
+		else if (key == 'e') { // toggle water_effect (e -> effekt)
+			water_effect = 1 - water_effect;
+		}
 		else if (key == 'r') { // toggle radial_wave (r -> radiale Wellen)
-			radial_wave = 1 - radial_wave;
+			radial_flag = 1 - radial_flag;
+		}
+		else if (key == 'p') { // toggle play_flag (p -> play)
+			mirror_flag = 1 - mirror_flag;
+			water_color = 1 - water_color;
+			water_effect = 1 - water_effect;
+			radial_flag = 1 - radial_flag;
 		}
 
 		if (state == START_SCREEN)
@@ -485,36 +480,47 @@ int main( int, char**)
 			}
 		}
 
-		/* example for using the mouse events */
-		if (click_left(mp, folder))
-		{
-			
-		}
-
+		//Mouseklick-in-Rechteck-Event
 		Rect rect(0, height/2, width, ((height/2)-60));
 		if (click_in_rect(mp, rect, folder)) {
-			// Wellenquelle
-			const int cx = mp.mouse_pos.x;
-			const int cy = mp.mouse_pos.y;
+			//Welle hinzufügen
+			waves.push_back({mp.mouse_pos.x, mp.mouse_pos.y, globalTime});
+		}
 
-			for (int y = height / 2; y < height-60; ++y) {
+		//Wellen verarbeiten
+		for (auto it = waves.begin(); it != waves.end();) {
+			double elapsedTime = globalTime - it->startTime;
+
+			//Welle entfernen, wenn die max. Lebensdauer überschritten wurde
+			if (elapsedTime > MaxWaveTime) {
+				it = waves.erase(it);
+				continue;
+			}
+
+			//Zeitliche Dämpfung
+			double timeDamping = exp(-alpha * elapsedTime);
+
+			// Wellen berechnen
+			for (int y = height / 2; y < height - 60; ++y) {
 				for (int x = 0; x < width; ++x) {
-					// abstand vom mittelpunkt
-					double r = std::sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy));
+					//Abstand zum Mittelpunkt der aktuellen Welle
+					double r = sqrt(pow(x - it->wx, 2) + pow(y - it->wy, 2));
 
-					// wassertropfen-welle berechnen
-					double wave = amplitude * std::sin(2.0 * CV_PI * r / wavelength - speed * time) / (1.0 + damping * r);
+					// Wassertropfen-Welle berechnen
+					double wave = amplitude * timeDamping * sin(2.0 * CV_PI * r / wavelength - speed * elapsedTime) / (1.0 + damping * r);
 
-					//farbwerte mit wellenwert addieren
+					//Farbwerte setzen
 					unsigned long pos = x * channels + y * stride;
 					for (unsigned int c = 0; c < channels; c++) {
 						cam_img.data[pos + c] = saturate_cast<uchar>(cam_img.data[pos + c] + wave);
 					}
 				}
 			}
-			// zeitparameter anpassen
-			time += 0.1;
+			//Nächste Welle
+			++it;
 		}
+
+
 		std::this_thread::sleep_for(std::chrono::milliseconds(30));
 		/********************************************************************************************/
 		/* show window with live video	*/		//Le-Wi: Funktionalitäten zum Schließen (x-Button)
@@ -522,7 +528,7 @@ int main( int, char**)
 		{
 			break;
 		}
-		imshow( windowGameOutput, cam_img); //Ausgabefenster darstellen		
+		imshow(windowGameOutput, cam_img); //Ausgabefenster darstellen	
 	}	// Ende der Endlos-Schleife
 
 	//Freigabe aller Matrizen
