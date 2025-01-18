@@ -16,6 +16,7 @@ struct Wave{
 	double startTime; //Startzeitpunkt der Welle
 };
 
+vector<Wave> waves; //Liste der aktuell aktiven Wellen
 
 
 /* --------------------------------------------------------------
@@ -30,26 +31,11 @@ void mouse_event( int evt, int x, int y, int, void* param)
 	mp->mouse_pos.y = y; //Mouse y-Position
 }
 
-
-/* --------------------------------------------------------------
- * click_left()
- *----------------------------------------------------------------*/
-bool click_left(MouseParams mp, char* folder)
-{
-	if (mp.evt == EVENT_LBUTTONDOWN)
-	{
-		{
-			return true;
-		}
-	}
-	return false;
-}
-
 /* --------------------------------------------------------------
  * click_in_rect()
  * Wurde in einen bestimmten Bereich mit links geklickt?
  *----------------------------------------------------------------*/
-bool click_in_rect(MouseParams mp, Rect rect, char* folder)
+void click_in_rect(MouseParams mp, Rect rect)
 {
 	if (mp.evt == EVENT_LBUTTONDOWN)
 	{
@@ -58,13 +44,9 @@ bool click_in_rect(MouseParams mp, Rect rect, char* folder)
 				mp.mouse_pos.x <= rect.x + rect.width &&
 				mp.mouse_pos.y <= rect.y + rect.height)
 		{
-			/*char path[512];
-			sprintf_s(path, "%s/waterdrop.mp3", folder);
-			PlaySoundA(path, NULL, SND_ASYNC);*/
-			return true;
+			
 		}
 	}
-	return false;
 }
 
 /* --------------------------------------------------------------
@@ -86,38 +68,63 @@ bool mouse_in_rect(MouseParams mp, Rect rect)
 	return false;
 }
 
+Mat applyWaveDistortion(const Mat& frame, const vector<Wave>& waves, double currentTime, double amplitude, double wavelength, double speed, double damping, double alpha, double maxWaveTime) {
+
+	Mat waveFrame = frame.clone();
+	int height = frame.rows;
+	int width = frame.cols;
+	int channels = frame.channels();
+	int stride = width * channels;
+
+	// Wellen berechnen
+	for (int y = height/2; y < height - 60; y++) {
+		for (int x = 0; x < width; x++) {
+
+			double totalWaveShift = 0.0; // Summe der Verschiebungen
+
+			// Berechne die Gesamtverschiebung durch alle Wellen
+			for (const auto& wave : waves) {
+				double elapsedTime = currentTime - wave.startTime;
+				double timeDamping = exp(-alpha * elapsedTime);
+				double rsqrt = (x - wave.wx) * (x - wave.wx) + (y - wave.wy) * (y - wave.wy);
+				double r = sqrt(rsqrt);
+				double waveShift = amplitude * timeDamping * sin(2.0 * CV_PI * r / wavelength - speed * elapsedTime) / (1.0 + damping * r);
+				totalWaveShift += waveShift;  
+
+			}
+
+			// Berechne die neue Position mit der Gesamtverschiebung
+			for(const auto& wave : waves){	
+				double rsqrt = (x - wave.wx) * (x - wave.wx) + (y - wave.wy) * (y - wave.wy);
+				double r = sqrt(rsqrt);
+				int newX = static_cast<int>(x + totalWaveShift * (x - wave.wx) / r);
+				int newY = static_cast<int>(y + totalWaveShift * (y - wave.wy) / r);
+
+				// Überprüfen, ob die neuen Koordinaten innerhalb des Bildes liegen
+				if (newX >= 0 && newX < width && newY >= 0 && newY < height - 60) {
+					int pos = x * channels + y * stride;
+					int newPos = newX * channels + newY * stride;
+					for (int c = 0; c < channels; c++) {
+						waveFrame.data[pos + c] = frame.data[newPos + c];
+					}
+				}
+			}
+			
+		}
+	}
+
+	return waveFrame;
+}
+ 
 /*---------------------------------------------------------------
 * main()
 *---------------------------------------------------------------*/
 int main( int, char**)
 {
-			/* check memory usage	
-	 *  see https://msdn.microsoft.com/de-de/library/x98tx3cf.aspx
-	 */
-	//_CrtSetDbgFlag ( _CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF );
-	//_CrtSetReportMode( _CRT_ERROR, _CRTDBG_MODE_DEBUG );
-	//_CrtSetBreakAlloc( 1358);
-
-	/* 1015 steht hier für eine Speicherbelegungsnummer, welche 
-	 * in {}-Klammern im Memory-Report ausgegeben wurde. Bei erneuter 
-	 * Ausführung unterbricht das Programm dann an der Stelle, an dem 
-	 * der jeweilige Speicher allokiert wurde.
-	 */
-
-	/* check for two different folders: correct folder depends on where executable is started
-	* either from IDE or bin folder */
-	const char* folder1 = "Resources";
-	const char* folder2 = "../Resources";
-	char folder[15], path[512];
-
 	MouseParams mp; // Le-Wi: Zur Auswertung von Mouse-Events
 	Scalar colour;
 	Mat	cam_img; //eingelesenes Kamerabild
-	Mat cam_img_grey; //Graustufenkamerabild für autom. Startgesichtfestlegung
-	Mat strElement; //Strukturelement für Dilatations-Funktion
-	Mat3b rgb_scale;	// leerer Bildkontainer für RGB-Werte
 	char *windowGameOutput = "camDemo"; // Name of window
-	//double	scale = 1.0;				// Skalierung der Berechnungsmatrizen 
 	unsigned int width, height, channels, stride;	// Werte des angezeigten Bildes
 	int 
 		key = 0,	// Tastatureingabe
@@ -127,10 +134,10 @@ int main( int, char**)
 	bool fullscreen_flag = false; //Ist fullscreen aktivert oder nicht?
 	bool mirror_flag = false; //Mirror-Flag gibt an, ob Bild gespiegelt ist oder nicht
 	bool water_color = false; //Water-Color-Flag gibt an, ob Wasserfarben verwendet werden
-	bool water_effect = false;//Water-Effect-Flag gibt an, ob Wassereffekte verwendet werden
 	bool radial_flag = false; //Radial-Flag gibt an, ob Radialwellen verwendet werden
-	bool play_flag = false;   //Play-Flag um alle Effekte gleichzeitig zu aktivieren
+	bool freezeflag = false; //Freeze-Flag
 	DemoState state; //Aktueller Zustand des Spiels
+
 #if defined _DEBUG || defined LOGGING
 		FILE *log = NULL;
 		log = fopen( "log_debug.txt", "wt");
@@ -165,11 +172,9 @@ int main( int, char**)
 		printf("* Start Screen\n");
 		printf(" - 'ESC' stop the program \n");
 		printf(" - 'f'   toggle fullscreen\n");
-		printf(" - 's'   toggle mirror img\n");
-		printf(" - 'w'   toggle water color\n");
-		printf(" - 'e'   toggle water effect\n");
-		printf(" - 'r'   toggle radial wave\n");
-		printf(" - 'p'   toggle all effects\n");
+		printf(" - 'g'   toggle freeze\n");
+		printf(" - 'p'   toggle effects\n");
+		printf(" - 'Spacebar' in Water to add Wave\n");
 	}
 	{
 		HWND console = GetConsoleWindow();
@@ -200,27 +205,7 @@ int main( int, char**)
 	resizeWindow( windowGameOutput, width, height); //Start Auflösung der Kamera
 	HWND cvHwnd = (HWND )cvGetWindowHandle( windowGameOutput); //window-handle to detect window-states
 
-	srand( (unsigned) time(NULL));//seeds the random number generator
-
-	/* find folder for ressources	*/
-	{
-		FILE* in = NULL;
-		strcpy_s(folder, folder1);/* try first folder */
-		sprintf_s(path, "%s/waterdrop.mp3", folder);
-		in = fopen(path, "r");
-		if (in == NULL)
-		{
-			strcpy_s(folder, folder2); /* try other folder */
-			sprintf_s(path, "%s/waterdrop.mp3", folder);
-			in = fopen(path, "r");
-			if (in == NULL)
-			{
-				printf("Ressources cannot be found\n");
-				exit(99);
-			}
-		}
-		fclose(in);
-	}
+	srand( (unsigned) time(NULL));//seeds the random number generator	
 
 	start_time = clock();
 
@@ -228,61 +213,36 @@ int main( int, char**)
 
 	// Setup zum Auswerten von Mausevents
 	setMouseCallback( windowGameOutput, mouse_event, (void*)&mp);
-
-	//Vektoren für Wassereffekt:
-	vector<unsigned char> smooth_img(width * height * channels);
-	vector<unsigned char> edge_data(width * height * channels);
+	Rect mouseRect(0, height / 2, width, ((height / 2) - 60));
 	
 	//Wellenparameter:
-	vector<Wave> waves; //Liste der aktuell aktiven Wellen
-
-	const double amplitude = 255.0; // Maximale Amplitude
-	const double wavelength = 50.0; // Wellenlänge
-	const double speed = 10.0;      // Geschwindigkeit der Welle
-	const double damping = 0.5;		// räumliche Dämpfung
-	const double alpha = 1.0;		// Parameter zur Berechnung der zeitlichen Dämpfung
-	const double MaxWaveTime = 2.0;	// lebensdauer einer Welle
+	double amplitude = 100.0;	// Maximale Amplitude
+	double wavelength = 50.0;	// Wellenlänge
+	double speed = 10.0;		// Geschwindigkeit der Welle
+	double maxWaveTime = 5.0;	// lebensdauer einer Welle
+	double damping = 0.1;		// räumliche Dämpfung
+	double alpha = 0.5;			// Parameter zur Berechnung der zeitlichen Dämpfung
 
 	double globalTime = 0.0;
-	double TimeDiv = 1.0 / 30.0;	
 
 	/*-------------------- main loop ---------------*/
 	while (state != DEMO_STOP)
 	{
-		// ein Bild aus dem Video betrachten und in cam_img speichern
-		if (cap.read(cam_img) == false)
-		{ //falls nicht möglich: Fehlermeldung
-			destroyWindow("camDemo"); //Ausgabefenster ausblenden
+		cap >> cam_img;
 
-			AllocConsole(); //Konsole wieder einschalten
-			printf("Verbindung zur Kamera verloren!\n");
-			printf("Zum Beenden 'Enter' druecken\n");
-			cap.release(); //Freigabe der Kamera
-#if defined _DEBUG || defined LOGGING
-			fprintf(log, "Verbindung zur Kamera verloren!\n");
-			fclose(log);
-#endif
-			while (getchar() == NULL); //Warten auf Eingabe
-			break; //Beende die Endlosschleife
-		}
-
-		//Aktuelle Zeit berechnen
-		globalTime += TimeDiv;
-
-		//Runterskalierung des Bildes für weniger Rechaufwand (Faktor 1/2)
-		//double scale = 0.5;
-		//resize(cam_img, rgb_scale, Size(), scale, scale);
+		//Zeit aktualisieren
+		if(!freezeflag) globalTime += 0.1;
 
 		//Spiegelung
 		if (mirror_flag) {
 			// horizontale Spiegelung der oberen Bildhälfte
-			for (int y = height/2; y < height; y++) {
+			for (int y = height / 2; y < height - 60; y++) {
 				for (int x = 0; x < width; x++) {
-					unsigned long pos = x * channels + y * stride;
-					unsigned long posNew = x * channels + (height - y) * stride;
-					for (unsigned int c = 0; c < channels; c++) /* all components B, G, R */
-					{
-						cam_img.data[pos + c] = cam_img.data[posNew + c]; //Daten der aktuellen Position werden an neue Position gegeben
+					int pos = x * channels + y * stride;
+					int newPos = x * channels + (height - y) * stride;
+
+					for (int c = 0; c < channels; c++) {
+						cam_img.data[pos + c] = cam_img.data[newPos + c];
 					}
 				}
 			}
@@ -291,9 +251,11 @@ int main( int, char**)
 		//Wasserfarben in der unteren Bildhälfte
 		if (water_color) {
 			//BGR Farbkanäle werden in RGB Farbkanäle konvertiert
-			for (int y = height / 2; y < height; y++) {
+			for (int y = height / 2; y < height - 60; y++) {
 				for (int x = 0; x < width; x++) {
-					unsigned long pos = x * channels + y * stride;
+					int pos = x * channels + y * stride;
+
+					//Swap channels
 					int tmp = cam_img.data[pos];
 					cam_img.data[pos] = cam_img.data[pos + 2];
 					cam_img.data[pos + 2] = tmp;
@@ -301,94 +263,16 @@ int main( int, char**)
 			}
 		}
 
-		if(water_effect){
-			//Durchschnittswerte der nachbarn berechnen (Glättung)
-			for (int y = height / 2 + 1; y < height - 59; ++y) {
-				for (int x = 1; x < width-1; ++x){
-					int avg[3] {0, 0, 0};
-
-					//Nachbarwerte für RGB addieren
-					for (int iy = -1; iy <= 1; ++iy) {
-						for (int ix = -1; ix <= 1; ++ix) {
-							unsigned int neighbor_pos = (x + ix) * channels + (y + iy) * stride;
-							for (int c = 0; c < channels; ++c) {
-								avg[c] += cam_img.data[neighbor_pos + c];
-							}
-						}
-					}
-
-					//Mittelwert berechnen
-					unsigned int pos = x * channels + y * stride;
-					for (int c = 0; c < channels; ++c) {
-						avg[c] /= 9; // Durchschnitt
-						smooth_img[pos + c] = avg[c];
-					}
-				}
-			}
-			//Kantenerkennung (Sobel-Operator)
-			for (int y = height / 2 + 1; y < height - 59; ++y) {
-				for (int x = 1; x < width - 1; ++x) {
-					int gradient[3] = { 0, 0, 0 };
-
-					for (int c = 0; c < channels; ++c) {
-						int gx = 0;
-						int gy = 0;
-
-						for (int iy = -1; iy <= 1; ++iy) {
-							for (int ix = -1; ix <= 1; ++ix) {
-								int weight_x = (ix == -1) ? -1 : (ix == 1) ? 1 : 0;
-								int weight_y = (iy == -1) ? -1 : (iy == 1) ? 1 : 0;
-
-								unsigned int neighbor_pos = (x + ix) * channels + (y + iy) * stride;
-								gx += smooth_img[neighbor_pos + c] * weight_x;
-								gy += smooth_img[neighbor_pos + c] * weight_y;
-							}
-						}
-
-						// Gradientenberechnung
-						gradient[c] = sqrt(gx * gx + gy * gy);
-					}
-
-					unsigned int pos = x * channels + y * stride;
-					for (int c = 0; c < channels; ++c) {
-						edge_data[pos + c] = min(255, gradient[c]); // Begrenzung
-					}
-				}
-			}
-			// 3. Farbtiefen-Reduzierung (Posterization)
-			for (int y = height / 2; y < height-60; ++y) {
-				for (int x = 0; x < width; ++x) {
-					unsigned int pos = x * channels + y * stride;
-					for (int c = 0; c < channels; ++c) {
-						// Reduzierte Farbtiefe, z. B. 16 Stufen
-						cam_img.data[pos + c] = (cam_img.data[pos + c] / 16) * 16;
-
-						// Kombinieren von Kantendaten mit dem Originalbild
-						cam_img.data[pos + c] = min(255, cam_img.data[pos + c] + edge_data[pos + c] / 2);
-					}
-				}
-			}
-		}
-
-		//radiale Wellen im Bild
-		//Zunächst Wellenwert Berechnung an Punkt (x, y) durch Sinusfunktion (Abstand zum Quellpunkt berechnen => Radius r)
+		//Standard-Wellen
 		if (radial_flag) {
-
-			//Koordinaten der Wellenquelle
-			const int cx = width / 2;
-			const int cy = height / 3;
-			
-			for (int y = height / 2; y < height - 60; ++y) {
-				for (int x = 0; x < width; ++x) {
-					// Abstand zur Quelle
-					double r = sqrt(pow(x - cx, 2) + pow(y - cy, 2));
-
-					// Wassertropfen-Welle berechnen
-					double wave = amplitude * std::sin(2.0 * CV_PI * r / wavelength - speed * globalTime) / (1.0 + damping * r);
+			for (int y = height / 2; y < height - 60; y++) {
+				for (int x = 0; x < width; x++) {
+					// Strand-Welle berechnen
+					double wave = amplitude * sin(2.0 * CV_PI * y / wavelength - globalTime) / (1.0 + damping * y);
 
 					//Farbwerte setzen
-					unsigned long pos = x * channels + y * stride;
-					for (unsigned int c = 0; c < channels; c++) {
+					int pos = x * channels + y * stride;
+					for (int c = 0; c < channels; c++) {
 						cam_img.data[pos + c] = saturate_cast<uchar>(cam_img.data[pos + c] + wave);
 					}
 				}
@@ -409,19 +293,47 @@ int main( int, char**)
 #define FPS_OUTPUT
 #if defined FPS_OUTPUT || defined _DEBUG
 		//FPS-Ausgabe oben rechts
-		char fps_char[3];
-		sprintf ( fps_char, "%d", fps);
+		char fps_char[10];
+		sprintf ( fps_char, "FPS:      %d", fps);
 		const string& fps_string = (string) fps_char;
-		putText( cam_img, fps_string, Point( width - 40, 25), FONT_HERSHEY_SIMPLEX, 
+		putText( cam_img, fps_string, Point( width - 140, 15), FONT_HERSHEY_SIMPLEX, 
 			0.5 /*fontScale*/, Scalar( 0, 255, 255), 2);
 #endif
+		//Info-Ausgabe
+		char info_char[50];
 
-		//Height-Ausgabe oben links
-		char info_char[5];
-		sprintf(info_char, "%d", height);
-		const string& info_string = (string)info_char;
-		putText(cam_img, info_string, Point(40, 25), FONT_HERSHEY_SIMPLEX,
+		//Anzahl Wellen-Ausgabe
+		int waveCount = (waves.empty() ? 0 : waves.size());
+		sprintf(info_char, "WaveCount: %.d", waveCount);
+		putText(cam_img, (string)info_char, Point(width - 140, 30), FONT_HERSHEY_SIMPLEX,
 			0.5 /*fontScale*/, Scalar(0, 255, 255), 2);
+
+
+		//Amplitude-Ausgabe
+		sprintf(info_char, "Amplitude(s/w): %.0f", amplitude);
+		putText(cam_img, (string)info_char, Point(40, 15), FONT_HERSHEY_SIMPLEX,
+			0.5 /*fontScale*/, Scalar(0, 255, 255), 2);
+
+		//Wavelength-Ausgabe
+		sprintf(info_char, "Wellenlaenge(a/d): %.0f", wavelength);
+		putText(cam_img, (string)info_char, Point(40, 30), FONT_HERSHEY_SIMPLEX,
+			0.5 /*fontScale*/, Scalar(0, 255, 255), 2);
+
+		//Speed-Ausgabe
+		sprintf(info_char, "Speed(-/+): %.0f", speed);
+		putText(cam_img, (string)info_char, Point(40, 45), FONT_HERSHEY_SIMPLEX,
+			0.5 /*fontScale*/, Scalar(0, 255, 255), 2);
+
+		//MaxWaveTime-Ausgabe
+		sprintf(info_char, "Wellendauer(1/2): %.0f", maxWaveTime);
+		putText(cam_img, (string)info_char, Point(250, 15), FONT_HERSHEY_SIMPLEX,
+			0.5 /*fontScale*/, Scalar(0, 255, 255), 2);
+
+		//Dämpfung
+		sprintf(info_char, "Daempfung(3/4): %.2f", alpha);
+		putText(cam_img, (string)info_char, Point(250, 30), FONT_HERSHEY_SIMPLEX,
+			0.5 /*fontScale*/, Scalar(0, 255, 255), 2);
+		
 
 		/* input from keyboard */
 		key = tolower( waitKey(1)); /* Strutz  convert to lower case */
@@ -441,25 +353,45 @@ int main( int, char**)
 				fullscreen_flag = false;
 			}
 		}
-		if (key == 's') //toggle mirror_flag (s -> spiegeln)
-		{
-			mirror_flag = 1 - mirror_flag;
+		if (key == 'g') { // Freeze ein/aus
+			freezeflag = 1 - freezeflag;
 		}
-		else if (key == 'w') { // toggle water_color (w -> wasserfarbe)
-			water_color = 1 - water_color;
-		}
-		else if (key == 'e') { // toggle water_effect (e -> effekt)
-			water_effect = 1 - water_effect;
-		}
-		else if (key == 'r') { // toggle radial_wave (r -> radiale Wellen)
-			radial_flag = 1 - radial_flag;
-		}
-		else if (key == 'p') { // toggle play_flag (p -> play)
+		if (key == 'p') { // toggle all Effects
 			mirror_flag = 1 - mirror_flag;
 			water_color = 1 - water_color;
-			water_effect = 1 - water_effect;
 			radial_flag = 1 - radial_flag;
 		}
+		if (key == 'w') {  // Amplitude erhöhen
+			if(amplitude < 255.0) amplitude += 5.0;
+		}
+		if (key == 's') {  // Amplitude verringern
+			if(amplitude > 5.0) amplitude -= 5.0;
+		}
+		if (key == 'd') {  // Wellenlänge erhöhen
+			if(wavelength < 100.0) wavelength += 5.0;
+		}
+		if (key == 'a') {  // Wellenlänge verringern
+			if (wavelength > 5.0) wavelength -= 5.0;
+		}
+		if (key == '+') {  // Speed erhöhen
+			if (speed < 20.0) speed += 1.0;
+		}
+		if (key == '-') {  // Speed verringern
+			if (speed > 1.0) speed -= 1.0;
+		}
+		if (key == '2') {  // Wellendauer erhöhen
+			if (maxWaveTime < 10.0) maxWaveTime += 1.0;
+		}
+		if (key == '1') {  // Wellendauer verringern
+			if (maxWaveTime > 1.0) maxWaveTime -= 1.0;
+		}
+		if (key == '4') {  // Dämpfung erhöhen
+			if (alpha < 1.0) alpha += 0.05;
+		}
+		if (key == '3') {  // Dämpfung verringern
+			if (alpha > 0.01) alpha -= 0.05;
+		}
+		
 
 		if (state == START_SCREEN)
 		{
@@ -480,63 +412,40 @@ int main( int, char**)
 			}
 		}
 
-		//Mouseklick-in-Rechteck-Event
-		Rect rect(0, height/2, width, ((height/2)-60));
-		if (click_in_rect(mp, rect, folder)) {
-			//Welle hinzufügen
-			waves.push_back({mp.mouse_pos.x, mp.mouse_pos.y, globalTime});
-		}
-
-		//Wellen verarbeiten
-		for (auto it = waves.begin(); it != waves.end();) {
-			double elapsedTime = globalTime - it->startTime;
-
-			//Welle entfernen, wenn die max. Lebensdauer überschritten wurde
-			if (elapsedTime > MaxWaveTime) {
-				it = waves.erase(it);
-				continue;
+		//Mouse-in-Rechteck-Event
+		if (mouse_in_rect(mp, mouseRect)) {
+			//Welle hinzufügen wenn LeerTaste gedrückt wird
+			if (key == ' ') {
+				waves.push_back({ mp.mouse_pos.x, mp.mouse_pos.y, globalTime });
 			}
-
-			//Zeitliche Dämpfung
-			double timeDamping = exp(-alpha * elapsedTime);
-
-			// Wellen berechnen
-			for (int y = height / 2; y < height - 60; ++y) {
-				for (int x = 0; x < width; ++x) {
-					//Abstand zum Mittelpunkt der aktuellen Welle
-					double r = sqrt(pow(x - it->wx, 2) + pow(y - it->wy, 2));
-
-					// Wassertropfen-Welle berechnen
-					double wave = amplitude * timeDamping * sin(2.0 * CV_PI * r / wavelength - speed * elapsedTime) / (1.0 + damping * r);
-
-					//Farbwerte setzen
-					unsigned long pos = x * channels + y * stride;
-					for (unsigned int c = 0; c < channels; c++) {
-						cam_img.data[pos + c] = saturate_cast<uchar>(cam_img.data[pos + c] + wave);
-					}
-				}
-			}
-			//Nächste Welle
-			++it;
 		}
 
 
-		std::this_thread::sleep_for(std::chrono::milliseconds(30));
+		Mat waveFrame = applyWaveDistortion(cam_img, waves, globalTime, amplitude, wavelength, speed, damping, alpha, maxWaveTime);
+		
+
 		/********************************************************************************************/
 		/* show window with live video	*/		//Le-Wi: Funktionalitäten zum Schließen (x-Button)
 		if (!IsWindowVisible( cvHwnd)) 
 		{
 			break;
 		}
-		imshow(windowGameOutput, cam_img); //Ausgabefenster darstellen	
+
+		imshow(windowGameOutput, waveFrame); //Ausgabefenster darstellen	
+
+		//abgelaufene Wellen aus Vektor entfernen mit Lamda-Ausdruck
+		waves.erase(remove_if(waves.begin(), waves.end(), [globalTime, maxWaveTime](const Wave& wave) {
+			return globalTime - wave.startTime > maxWaveTime;
+
+		}), waves.end());
+
+		waveFrame.release();
+
 	}	// Ende der Endlos-Schleife
 
 	//Freigabe aller Matrizen
 	if (cap.isOpened()) cap.release(); //Freigabe der Kamera
 	if (cam_img.data) cam_img.release();
-	if (cam_img_grey.data) cam_img_grey.release();
-	if (rgb_scale.data) rgb_scale.release();
-	if (strElement.data) strElement.release();
 
 
 #if defined _DEBUG || defined LOGGING
