@@ -7,6 +7,9 @@
 *********************************************************************/
 
 #include "camDemo.h"
+#include <cmath>
+#include <vector>
+#include <algorithm>
 
 
 //Struktur für einzelne Wellen
