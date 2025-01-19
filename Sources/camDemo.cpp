@@ -68,14 +68,17 @@ bool mouse_in_rect(MouseParams mp, Rect rect)
 	return false;
 }
 
-Mat applyWaveDistortion(const Mat& frame, const vector<Wave>& waves, double currentTime, double amplitude, double wavelength, double speed, double damping, double alpha, double maxWaveTime) {
+Mat applyWaveDistortion(const Mat& frame, const vector<Wave>& waves,
+	double currentTime, double amplitude, double wavelength,
+	double speed, double damping, double alpha, double maxWaveTime) {
 
 	Mat waveFrame = frame.clone();
 	int height = frame.rows;
 	int width = frame.cols;
 	int channels = frame.channels();
 	int stride = width * channels;
-
+	//...
+	
 	// Wellen berechnen
 	for (int y = height/2; y < height - 60; y++) {
 		for (int x = 0; x < width; x++) {
@@ -112,7 +115,6 @@ Mat applyWaveDistortion(const Mat& frame, const vector<Wave>& waves, double curr
 			
 		}
 	}
-
 	return waveFrame;
 }
  
@@ -134,8 +136,8 @@ int main( int, char**)
 	bool fullscreen_flag = false; //Ist fullscreen aktivert oder nicht?
 	bool mirror_flag = false; //Mirror-Flag gibt an, ob Bild gespiegelt ist oder nicht
 	bool water_color = false; //Water-Color-Flag gibt an, ob Wasserfarben verwendet werden
-	bool radial_flag = false; //Radial-Flag gibt an, ob Radialwellen verwendet werden
-	bool freezeflag = false; //Freeze-Flag
+	bool strand_flag = false; //Strand-Flag gibt an, ob Strandwellen verwendet werden
+	bool freeze_flag = false; //Freeze-Flag
 	DemoState state; //Aktueller Zustand des Spiels
 
 #if defined _DEBUG || defined LOGGING
@@ -213,7 +215,6 @@ int main( int, char**)
 
 	// Setup zum Auswerten von Mausevents
 	setMouseCallback( windowGameOutput, mouse_event, (void*)&mp);
-	Rect mouseRect(0, height / 2, width, ((height / 2) - 60));
 	
 	//Wellenparameter:
 	double amplitude = 100.0;	// Maximale Amplitude
@@ -231,12 +232,12 @@ int main( int, char**)
 		cap >> cam_img;
 
 		//Zeit aktualisieren
-		if(!freezeflag) globalTime += 0.1;
+		if(!freeze_flag) globalTime += 0.1;
 
 		//Spiegelung
 		if (mirror_flag) {
 			// horizontale Spiegelung der oberen Bildhälfte
-			for (int y = height / 2; y < height - 60; y++) {
+			for (int y = height / 2; y < height-60; y++) {
 				for (int x = 0; x < width; x++) {
 					int pos = x * channels + y * stride;
 					int newPos = x * channels + (height - y) * stride;
@@ -251,7 +252,7 @@ int main( int, char**)
 		//Wasserfarben in der unteren Bildhälfte
 		if (water_color) {
 			//BGR Farbkanäle werden in RGB Farbkanäle konvertiert
-			for (int y = height / 2; y < height - 60; y++) {
+			for (int y = height / 2; y < height-60; y++) {
 				for (int x = 0; x < width; x++) {
 					int pos = x * channels + y * stride;
 
@@ -263,9 +264,9 @@ int main( int, char**)
 			}
 		}
 
-		//Standard-Wellen
-		if (radial_flag) {
-			for (int y = height / 2; y < height - 60; y++) {
+		//Strand-Wellen
+		if (strand_flag) {
+			for (int y = height / 2; y < height-60; y++) {
 				for (int x = 0; x < width; x++) {
 					// Strand-Welle berechnen
 					double wave = amplitude * sin(2.0 * CV_PI * y / wavelength - globalTime) / (1.0 + damping * y);
@@ -303,7 +304,7 @@ int main( int, char**)
 		char info_char[50];
 
 		//Anzahl Wellen-Ausgabe
-		int waveCount = (waves.empty() ? 0 : waves.size());
+		int waveCount = waves.size();
 		sprintf(info_char, "WaveCount: %.d", waveCount);
 		putText(cam_img, (string)info_char, Point(width - 140, 30), FONT_HERSHEY_SIMPLEX,
 			0.5 /*fontScale*/, Scalar(0, 255, 255), 2);
@@ -320,7 +321,7 @@ int main( int, char**)
 			0.5 /*fontScale*/, Scalar(0, 255, 255), 2);
 
 		//Speed-Ausgabe
-		sprintf(info_char, "Speed(-/+): %.0f", speed);
+		sprintf(info_char, "Geschwindigkeit(-/+): %.0f", speed);
 		putText(cam_img, (string)info_char, Point(40, 45), FONT_HERSHEY_SIMPLEX,
 			0.5 /*fontScale*/, Scalar(0, 255, 255), 2);
 
@@ -353,14 +354,16 @@ int main( int, char**)
 				fullscreen_flag = false;
 			}
 		}
-		if (key == 'g') { // Freeze ein/aus
-			freezeflag = 1 - freezeflag;
-		}
+
 		if (key == 'p') { // toggle all Effects
 			mirror_flag = 1 - mirror_flag;
 			water_color = 1 - water_color;
-			radial_flag = 1 - radial_flag;
+			strand_flag = 1 - strand_flag;
 		}
+		if (key == 'g') { // toggle Freeze
+			freeze_flag = 1 - freeze_flag;
+		}
+
 		if (key == 'w') {  // Amplitude erhöhen
 			if(amplitude < 255.0) amplitude += 5.0;
 		}
@@ -413,6 +416,7 @@ int main( int, char**)
 		}
 
 		//Mouse-in-Rechteck-Event
+		Rect mouseRect(0, height / 2, width, ((height / 2) - 60));
 		if (mouse_in_rect(mp, mouseRect)) {
 			//Welle hinzufügen wenn LeerTaste gedrückt wird
 			if (key == ' ') {
